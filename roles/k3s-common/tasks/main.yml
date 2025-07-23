@@ -1,0 +1,52 @@
+#SPDX-License-Identifier: MIT-0
+---
+# tasks file for k3s-common
+
+- name: Ensure requiered packages are installed
+  package:
+    name:
+      - curl
+      - wget
+      - sudo
+      - tar
+  state: present
+#k8s requires swap disabled for better memory management
+- name: turn off the swap
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+#Ensure the swap is disabled when restarting
+- name: Remove swap entry from /etc/fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*swap.*)$'
+    replace: '# \1'
+
+- name: Enable IP forwarding
+  sysctl: 
+    name: net.ipv4.ip_forward
+    value: 1
+    state: present
+    reload: yes
+- name: set bridge nf-call-ip-tables
+  sysctl:
+    name: net.bridge.nf-call-ip-tables
+    value: 1
+    state: present
+    reload: yes
+- name: set bridge nf-call-ip6-tables
+  systcl:
+    name: net.bridge.nf-call-ip-tables
+    value: 1
+    state: present
+    reload: yes
+# the module br_netfilter is necessary to apply the bridge filters mentioned before
+- name: Ensure br_netfilter is loaded
+  modprobe:
+    name: br_netfilter
+# ensure that br_netfilter is loaded automaticaly while the restart
+- name: Add br_netfilter to /etc/modules-load.d/k8s.conf
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      br_netfilter
+    state: present
