@@ -1,0 +1,14 @@
+---
+
+- name: install k3s dependencies for all nodes
+  hosts: all
+  become: true
+  roles:
+    - k3s-common
+
+- name: install k3s for masterr nodes
+  hosts: masters 
+  become: true
+  roles:
+    - k3s-master
+
