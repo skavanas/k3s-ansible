@@ -5,21 +5,18 @@
   get_url:
     url:  https://get.k3s.io
     dest: /tmp/k3s_install.sh
-    mod: '0755'
+    mode: '0755'
 - name: run k3s script as server (master)
   shell: |
     INSTALL_K3S_EXEC="--write-kubeconfig-mode=644" \
-    sh tmp/k3s_install.sh
+    sh /tmp/k3s_install.sh
   args:
-    creates: user/local/bin/k3s
+    creates: /user/local/bin/k3s
 - name: assert kubernetes api is ready 
-  uri:
-    url: https://localhost:6443/healthz
-    method: GET
-    validate_certs: no
-    status_code: 200
-  register: result
-  retries: 5
-  delay: 5
-  until: result.status == 200
-       
+  ansible.builtin.wait_for:
+    port: 6443
+    host: 127.0.0.1
+    state: started
+    delay: 5
+    timeout: 10
+  
