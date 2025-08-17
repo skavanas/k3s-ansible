@@ -1,0 +1,14 @@
+---
+- name: cleanup k3s workers
+  hosts: workers
+  gather_facts: true
+  roles: 
+    - worker-cleanup
+
+- name: cleanup k3s masters
+  hosts: masters
+  gather_facts: true
+  roles: 
+    - master-cleanup
+
+

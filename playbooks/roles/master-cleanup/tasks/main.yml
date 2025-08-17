@@ -1,0 +1,162 @@
+#SPDX-License-Identifier: MIT-0
+---
+# tasks file for master-cleanup
+# roles/k3s-uninstall/tasks/main.yml
+- name: Check if K3s server is installed
+  stat:
+    path: /usr/local/bin/k3s-uninstall.sh
+  register: k3s_server_uninstall_script
+
+- name: Display K3s server status
+  debug:
+    msg: "K3s server uninstall script found: {{ k3s_server_uninstall_script.stat.exists }}"
+
+- name: K3s server cleanup tasks
+  block:
+    - name: Stop K3s server service if running
+      systemd:
+        name: k3s
+        state: stopped
+        enabled: no
+      ignore_errors: true
+
+    - name: Execute K3s server uninstall script
+      shell: /usr/local/bin/k3s-uninstall.sh
+      register: uninstall_output
+      tags:
+        - k3s-server-uninstall
+
+    - name: Display uninstall output
+      debug:
+        var: uninstall_output.stdout_lines
+      when: uninstall_output is defined
+
+    - name: Remove K3s server directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/rancher/k3s
+        - /etc/rancher/k3s
+        - /var/log/k3s.log
+        - /var/lib/rancher
+      ignore_errors: true
+
+    - name: Remove K3s server binary and scripts
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/k3s
+        - /usr/local/bin/k3s-uninstall.sh
+        - /usr/local/bin/k3s-killall.sh
+        - /usr/local/bin/kubectl
+        - /usr/local/bin/crictl
+        - /usr/local/bin/ctr
+      ignore_errors: true
+
+    - name: Kill any remaining K3s server processes
+      shell: |
+        pkill -f k3s-server || true
+        pkill -f k3s || true
+        pkill -f containerd || true
+        pkill -f runc || true
+        pkill -f etcd || true
+      ignore_errors: true
+
+    - name: Clean up network interfaces
+      shell: |
+        # Remove CNI network interfaces
+        ip link delete cni0 2>/dev/null || true
+        ip link delete flannel.1 2>/dev/null || true
+        ip link delete kube-bridge 2>/dev/null || true
+        
+        # Clean iptables rules
+        iptables -F -t nat 2>/dev/null || true
+        iptables -X -t nat 2>/dev/null || true
+        iptables -F -t filter 2>/dev/null || true
+        iptables -X -t filter 2>/dev/null || true
+        iptables -F -t mangle 2>/dev/null || true
+        iptables -X -t mangle 2>/dev/null || true
+      ignore_errors: true
+
+    - name: Remove CNI plugins and configuration
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /opt/cni/bin
+        - /etc/cni/net.d
+      ignore_errors: true
+
+    - name: Clean up container runtime directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/containerd
+        - /run/containerd
+        - /var/lib/kubelet
+        - /run/k3s
+        - /var/lib/etcd
+      ignore_errors: true
+
+    - name: Remove kubeconfig files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/rancher/k3s/k3s.yaml
+        - /root/.kube/config
+        - /home/*/.kube/config
+      ignore_errors: true
+
+    - name: Clean up systemd service files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/k3s.service
+        - /etc/systemd/system/k3s-node.service
+      ignore_errors: true
+      notify: reload systemd
+
+    - name: Remove K3s manifests and addons
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/rancher/k3s/server/manifests
+        - /var/lib/rancher/k3s/server/static
+      ignore_errors: true
+
+    - name: Clean up certificates and keys
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/rancher/k3s/server/tls
+        - /var/lib/rancher/k3s/server/cred
+      ignore_errors: true
+
+    - name: Verify K3s server cleanup
+      shell: |
+        if pgrep -f "k3s.*server\|k3s.*etcd" > /dev/null; then
+          echo "FAILED: K3s server processes still running"
+          exit 1
+        else
+          echo "SUCCESS: K3s server processes stopped"
+        fi
+      register: cleanup_verification
+      ignore_errors: true
+
+    - name: Display cleanup verification
+      debug:
+        msg: "{{ cleanup_verification.stdout }}"
+
+  when: k3s_server_uninstall_script.stat.exists
+
+- name: K3s server not found
+  debug:
+    msg: "K3s server uninstall script not found. Skipping cleanup tasks."
+  when: not k3s_server_uninstall_script.stat.exists

@@ -8,7 +8,8 @@
     mode: '0755'
 - name: run k3s script as server (master)
   shell: |
-    INSTALL_K3S_EXEC="--write-kubeconfig-mode=644" \
+    export INSTALL_K3S_EXEC="--write-kubeconfig-mode=644"
+    export K3S_CLUSTER_INIT=true
     sh /tmp/k3s_install.sh
   args:
     creates: /user/local/bin/k3s
@@ -19,4 +20,21 @@
     state: started
     delay: 5
     timeout: 10
+
+- name: Get node token
+  slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: node_token
+
+- name: Display node token (for debugging)
+  debug:
+    msg: "Node token: {{ node_token.content | b64decode | trim }}"
+
+- name: Show master node status
+  shell: k3s kubectl get nodes -o wide
+  register: master_nodes
+
+- name: Display master nodes
+  debug:
+    var: master_nodes.stdout_lines
   

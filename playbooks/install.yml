@@ -11,4 +11,9 @@
   become: true
   roles:
     - k3s-master
+- name: install k3s for worker nodes
+  hosts: workers
+  become: true
+  roles:
+    - k3s-worker
 

@@ -1,0 +1,114 @@
+#SPDX-License-Identifier: MIT-0
+---
+# tasks file for worker-cleanup
+# roles/k3s-agent-uninstall/tasks/main.yml
+- name: Check if K3s agent is installed
+  stat:
+    path: /usr/local/bin/k3s-agent-uninstall.sh
+  register: k3s_agent_uninstall_script
+
+- name: Display K3s agent status
+  debug:
+    msg: "K3s agent uninstall script found: {{ k3s_agent_uninstall_script.stat.exists }}"
+
+- name: K3s agent cleanup tasks
+  block:
+    - name: Stop K3s agent service if running
+      systemd:
+        name: k3s-agent
+        state: stopped
+        enabled: no
+      ignore_errors: true
+
+    - name: Execute K3s agent uninstall script
+      shell: /usr/local/bin/k3s-agent-uninstall.sh
+      register: uninstall_output
+      tags:
+        - k3s-agent-uninstall
+
+    - name: Display uninstall output
+      debug:
+        var: uninstall_output.stdout_lines
+      when: uninstall_output is defined
+
+    - name: Remove K3s agent directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/rancher/k3s
+        - /etc/rancher/k3s
+        - /var/log/k3s-agent.log
+      ignore_errors: true
+
+    - name: Remove K3s agent binary and scripts
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/k3s
+        - /usr/local/bin/k3s-agent-uninstall.sh
+        - /usr/local/bin/k3s-killall.sh
+      ignore_errors: true
+
+    - name: Kill any remaining K3s processes
+      shell: |
+        pkill -f k3s-agent || true
+        pkill -f containerd || true
+        pkill -f runc || true
+      ignore_errors: true
+
+    - name: Clean up network interfaces
+      shell: |
+        # Remove CNI network interfaces
+        ip link delete cni0 2>/dev/null || true
+        ip link delete flannel.1 2>/dev/null || true
+        
+        # Clean iptables rules
+        iptables -F -t nat 2>/dev/null || true
+        iptables -X -t nat 2>/dev/null || true
+        iptables -F -t filter 2>/dev/null || true
+        iptables -X -t filter 2>/dev/null || true
+      ignore_errors: true
+
+    - name: Remove CNI plugins and configuration
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /opt/cni/bin
+        - /etc/cni/net.d
+      ignore_errors: true
+
+    - name: Clean up container runtime directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/containerd
+        - /run/containerd
+        - /var/lib/kubelet
+        - /run/k3s
+      ignore_errors: true
+
+    - name: Verify K3s agent cleanup
+      shell: |
+        if pgrep -f k3s-agent > /dev/null; then
+          echo "FAILED: K3s agent processes still running"
+          exit 1
+        else
+          echo "SUCCESS: K3s agent processes stopped"
+        fi
+      register: cleanup_verification
+      ignore_errors: true
+
+    - name: Display cleanup verification
+      debug:
+        msg: "{{ cleanup_verification.stdout }}"
+
+  when: k3s_agent_uninstall_script.stat.exists
+
+- name: K3s agent not found
+  debug:
+    msg: "K3s agent uninstall script not found. Skipping cleanup tasks."
+  when: not k3s_agent_uninstall_script.stat.exists
